@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::ops;
 use std::rc::Rc;
 use std::fmt;
@@ -17,17 +18,19 @@ struct Value {
     data: f32,
     //grad: f32,
     _prev: (ValueRef, ValueRef),
-    label: String,
+    label: Option<String>,
     // grad: f32,
     // _backward: f32,
-    // _op: Ops
+    _op: Option<String>,
 }
 
 impl Value {
     pub fn new(data: f32, label: &str) -> Self {
        Value{ data:data,
         _prev: (None, None),
-        label: label.to_string()}
+        label: Some(label.to_string()),
+        _op: None,
+    }
     }
 }
 
@@ -38,7 +41,7 @@ impl ops::Add for Value {
 
         let left_op = Box::new(self.clone());
         let right_op = Box::new(other.clone());
-        Self{ data: self.data+other.data, _prev: (Some(left_op), Some(right_op)), label: "+".to_string() }
+        Self{ data: self.data+other.data, _prev: (Some(left_op), Some(right_op)), _op: Some("+".to_string()), label: None }
     }
 }
 
@@ -48,48 +51,65 @@ impl ops::Mul for Value {
     fn mul(self, other: Self) -> Self {
         let left_op = Box::new(self.clone());
         let right_op = Box::new(other.clone());
-        Self{ data: self.data*other.data, _prev: (Some(left_op), Some(right_op)), label: '*'.to_string()}
+        Self{ data: self.data*other.data, _prev: (Some(left_op), Some(right_op)), _op: Some('*'.to_string()), label:  None}
     }
 
 }
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{{ {}| data: {:.4} }}", self.label, self.data)
+        match self.label {
+            Some(ref node_label) => write!(f, "{{ {}| data: {:.4} }}", node_label, self.data), // data node
+            None => write!(f, "{}", self._op.as_ref().unwrap()),
+
+        }
+        
     }
 }
 
 trait Trace {
-    fn trace(&self) -> Graph<&Value, &str>;
+    fn trace(&self) -> Graph<String, String>;
 }
 
+use petgraph::data::Build;
 use petgraph::graph::Graph;
 use petgraph::graph::NodeIndex;
 
 
 impl Trace for Value {
-    fn trace(&self) -> Graph<&Value, &str> {
-        let mut graph = Graph::<&Value, &str>::new();
-        let origin = graph.add_node(&self);
-        fn build<'a>(graph: &mut Graph<&'a Value, &str>, node: &'a Value, index: NodeIndex) {
+    fn trace(&self) -> Graph<String, String> {
+        let mut graph = Graph::<String, String>::new();
+      
+        let origin = graph.add_node(self.to_string());
+        fn build<'a>(graph: &mut Graph<String, String>, node: &'a Value, index: NodeIndex) {
+            match &node._op {
+                Some(op) =>{ 
+                    let op_index = graph.add_node(format!("{}", op.to_string()));
+                    graph.add_edge(op_index, index, "".to_string());
 
-            match &node._prev.0 {
-                Some(v) => {
-                    let destination_1 = graph.add_node(&v);
-                    let cost_1 = graph.add_edge(index, destination_1,"");
-                    build(graph, v, destination_1);
+                    match &node._prev.0 {
+                        Some(v) => {
+                            let destination_1 = graph.add_node(v.to_string());
+                            graph.add_edge( destination_1, op_index, "".to_string());
+                            build(graph, v, destination_1);
+                        },
+                        None => ()
+                    }
+                    
+                    match &node._prev.1 {
+                        Some(v) => {
+                            let destination_1 = graph.add_node(v.to_string());
+                            graph.add_edge( destination_1,op_index,"".to_string(),);
+                            build(graph,v, destination_1);
+                        },
+                        None => ()
+                    }
                 },
                 None => ()
             }
-            
-            match &node._prev.1 {
-                Some(v) => {
-                    let destination_1 = graph.add_node(&v);
-                    let cost_1 = graph.add_edge(index, destination_1,"");
-                    build(graph,v, destination_1);
-                },
-                None => ()
-            }
+
+
+           
 
         }
 
@@ -107,18 +127,30 @@ fn main() {
     let b = Value::new(-3.0, "b");
     let c = Value::new(10.0,"c");
     let mut e =a*b;
-    e.label='e'.to_string();
+    e.label=Some('e'.to_string());
     let mut d = e+c;
-    d.label = 'd'.to_string();
+    d.label =Some('d'.to_string());
     let f = Value::new(-2.0, "f");
     let mut L =d*f;
-    L.label = 'L'.to_string();
+    L.label = Some('L'.to_string());
 
     //println!("{:?},{:?},{:?},{:?},{:?}", a,b,c,d,e);
     //println!("{}",L);
     let graph = L.trace();
+    //println!("{:?}", Dot::with_config(&graph, &[Config::EdgeNoLabel]));
     //println!("{}", Dot::new(&graph));
-    //Dot::with_attr_getters(&graph, config, get_edge_attributes, get_node_attributes);
+    println!("{}",Dot::with_attr_getters(&graph, 
+        &[Config::EdgeNoLabel],
+        &|_, er| format!(""),
+        &|_, nr| {
+            let (_, weight) = nr;
+            match weight.as_str() {
+                "*" => format!(""),
+                "+" => format!(""),
+                _ =>  format!("shape=record"),
+            }
+           
+        },));
 }
 
 #[cfg(test)]
