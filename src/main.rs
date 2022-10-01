@@ -1,7 +1,8 @@
 use std::fmt;
 use std::fmt::Debug;
+use std::fmt::Display;
 use std::ops;
-
+use float_cmp::approx_eq;
 trait ValuePrint: fmt::Display {
     fn value_print(&self) {
         let output = self.to_string();
@@ -9,23 +10,34 @@ trait ValuePrint: fmt::Display {
     }
 }
 
-type ValueRef = Option<Box<Value>>;
+#[derive(Clone, Debug)]
+pub struct ValueRef 
+{
+    _ref: Box<Value>,
+} 
+
+impl ValueRef {
+    pub fn new(var: Value) ->ValueRef {
+        ValueRef { _ref: Box::new(var) }
+    }    
+}
 
 #[derive(Clone, Debug)]
-struct Value {
-    data: f32,
+pub struct Value {
+    data: f64,
     //grad: f32,
-    _prev: (ValueRef, ValueRef),
+    _prev: (Option<ValueRef>, Option<ValueRef>),
     label: Option<String>,
-    // grad: f32,
+    grad: f64,
     // _backward: f32,
     _op: Option<String>,
 }
 
 impl Value {
-    pub fn new(data: f32, label: &str) -> Self {
+    pub fn new(data: f64, label: &str) -> Self {
         Value {
             data: data,
+            grad: 0.0,
             _prev: (None, None),
             label: Some(label.to_string()),
             _op: None,
@@ -37,13 +49,14 @@ impl ops::Add for Value {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
-        let left_op = Box::new(self.clone());
-        let right_op = Box::new(other.clone());
+        let left_op = ValueRef::new(self.clone());
+        let right_op = ValueRef::new(other.clone());
         Self {
             data: self.data + other.data,
             _prev: (Some(left_op), Some(right_op)),
             _op: Some("+".to_string()),
             label: None,
+            grad: 0.0
         }
     }
 }
@@ -52,13 +65,14 @@ impl ops::Mul for Value {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self {
-        let left_op = Box::new(self.clone());
-        let right_op = Box::new(other.clone());
+        let left_op = ValueRef::new(self.clone());
+        let right_op = ValueRef::new(other.clone());
         Self {
             data: self.data * other.data,
             _prev: (Some(left_op), Some(right_op)),
             _op: Some('*'.to_string()),
             label: None,
+            grad: 0.0,
         }
     }
 }
@@ -66,9 +80,15 @@ impl ops::Mul for Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.label {
-            Some(ref node_label) => write!(f, "{{ {}| data: {:.4} }}", node_label, self.data), // data node
+            Some(ref node_label) => write!(f, "{{ {}| data: {:.4} | grad {:.4} }}", node_label, self.data, self.grad), // data node
             None => write!(f, "{}", self._op.as_ref().unwrap()),
         }
+    }
+}
+
+impl fmt::Display for ValueRef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self._ref)
     }
 }
 
@@ -94,7 +114,7 @@ impl Trace for Value {
                         Some(v) => {
                             let destination_1 = graph.add_node(v.to_string());
                             graph.add_edge(destination_1, op_index, "".to_string());
-                            build(graph, v, destination_1);
+                            build(graph, &v._ref, destination_1);
                         }
                         None => (),
                     }
@@ -103,7 +123,7 @@ impl Trace for Value {
                         Some(v) => {
                             let destination_1 = graph.add_node(v.to_string());
                             graph.add_edge(destination_1, op_index, "".to_string());
-                            build(graph, v, destination_1);
+                            build(graph, &v._ref, destination_1);
                         }
                         None => (),
                     }
@@ -119,16 +139,21 @@ impl Trace for Value {
 
 use petgraph::dot::{Config, Dot};
 fn main() {
-    let a = Value::new(2.0, "a");
+    let h = 0.0001;
+    let a = Value::new(2.0+h, "a");
     let b = Value::new(-3.0, "b");
     let c = Value::new(10.0, "c");
     let mut e = a * b;
     e.label = Some('e'.to_string());
     let mut d = e + c;
     d.label = Some('d'.to_string());
-    let f = Value::new(-2.0, "f");
-    let mut l = d * f;
+    let mut f = Value::new(-2.0, "f");
+    let mut l = d.clone() * f.clone(); // Error: this does not work due to copy
     l.label = Some('L'.to_string());
+
+    l.grad = 1.0;
+    d.grad = -2.0;
+    f.grad = 4.0;
 
     let graph = l.trace();
 
@@ -148,6 +173,41 @@ fn main() {
             },
         )
     );
+}
+
+fn lol () -> f64 {
+    let h = 0.0001;
+    let a = Value::new(2.0, "a");
+    let b = Value::new(-3.0, "b");
+    let c = Value::new(10.0, "c");
+    let mut e = a * b;
+    e.label = Some('e'.to_string());
+    let mut d = e + c;
+    d.label = Some('d'.to_string());
+    let f = Value::new(-2.0, "f");
+    let mut l = d * f;
+    l.label = Some('L'.to_string());
+    let L1 = l.data;
+
+    let a = Value::new(2.0+h, "a");
+    let b = Value::new(-3.0, "b");
+    let c = Value::new(10.0, "c");
+    let mut e = a * b;
+    e.label = Some('e'.to_string());
+    let mut d = e + c;
+    d.label = Some('d'.to_string());
+    let f = Value::new(-2.0, "f");
+    let mut l = d * f;
+    l.label = Some('L'.to_string());
+    let L2 = l.data;
+
+   
+
+    println!("L2={},L1={}, h={}", L2, L1, h);
+    (L2-L1)/h
+
+
+
 }
 
 #[cfg(test)]
@@ -200,25 +260,12 @@ mod test {
                 }
             },
         );
-        assert_eq!(dot_graph.to_string(), String::from("digraph {\n    \
-        0 [ label = \"{ L| data: -8.0000 }\" shape=record]\n    \
-        1 [ label = \"*\" ]\n    \
-        2 [ label = \"{ d| data: 4.0000 }\" shape=record]\n    \
-        3 [ label = \"+\" ]\n    \
-        4 [ label = \"{ e| data: -6.0000 }\" shape=record]\n    \
-        5 [ label = \"*\" ]\n    \
-        6 [ label = \"{ a| data: 2.0000 }\" shape=record]\n    \
-        7 [ label = \"{ b| data: -3.0000 }\" shape=record]\n    \
-        8 [ label = \"{ c| data: 10.0000 }\" shape=record]\n    \
-        9 [ label = \"{ f| data: -2.0000 }\" shape=record]\n    \
-        1 -> 0 [ ]\n    \
-        2 -> 1 [ ]\n    \
-        3 -> 2 [ ]\n    \
-        4 -> 3 [ ]\n    \
-        5 -> 4 [ ]\n    \
-        6 -> 5 [ ]\n    \
-        7 -> 5 [ ]\n    \
-        8 -> 3 [ ]\n    \
-        9 -> 1 [ ]\n}\n"));
+        assert_eq!(dot_graph.to_string(), String::from("digraph {\n    0 [ label = \"{ L| data: -8.0000 | grad 0.0000 }\" shape=record]\n    1 [ label = \"*\" ]\n    2 [ label = \"{ d| data: 4.0000 | grad 0.0000 }\" shape=record]\n    3 [ label = \"+\" ]\n    4 [ label = \"{ e| data: -6.0000 | grad 0.0000 }\" shape=record]\n    5 [ label = \"*\" ]\n    6 [ label = \"{ a| data: 2.0000 | grad 0.0000 }\" shape=record]\n    7 [ label = \"{ b| data: -3.0000 | grad 0.0000 }\" shape=record]\n    8 [ label = \"{ c| data: 10.0000 | grad 0.0000 }\" shape=record]\n    9 [ label = \"{ f| data: -2.0000 | grad 0.0000 }\" shape=record]\n    1 -> 0 [ ]\n    2 -> 1 [ ]\n    3 -> 2 [ ]\n    4 -> 3 [ ]\n    5 -> 4 [ ]\n    6 -> 5 [ ]\n    7 -> 5 [ ]\n    8 -> 3 [ ]\n    9 -> 1 [ ]\n}\n"));
     }
+
+    #[test]
+    fn test_derivative(){
+        assert!(approx_eq!(f64, 6.0, lol(), epsilon = 0.00001) );
+    }
+
 }
