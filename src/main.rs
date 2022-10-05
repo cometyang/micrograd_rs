@@ -1,7 +1,13 @@
+use std::borrow::Borrow;
+use std::cell::Cell;
+use std::cell::Ref;
+use std::cell::RefCell;
+use std::cell::RefMut;
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::ops;
+use std::rc::Rc;
 use float_cmp::approx_eq;
 trait ValuePrint: fmt::Display {
     fn value_print(&self) {
@@ -13,13 +19,26 @@ trait ValuePrint: fmt::Display {
 #[derive(Clone, Debug)]
 pub struct ValueRef 
 {
-    _ref: Box<Value>,
+    ref_: Rc<RefCell<Value>>,  // using Rc, smart pointer
 } 
 
 impl ValueRef {
     pub fn new(var: Value) ->ValueRef {
-        ValueRef { _ref: Box::new(var) }
-    }    
+        ValueRef { 
+            ref_: Rc::new(RefCell::new(var)) 
+        } // since we cannot copy so have to use RefCell
+    }
+    
+    pub fn borrow(&self) -> Ref<Value> {
+        (*self.ref_).borrow() // RefCell<Value>, Ref<'_, Value>
+    }
+    
+    pub fn borrow_mut(&mut self) -> RefMut<Value> {
+        (*self.ref_).borrow_mut()
+    }
+
+
+    
 }
 
 #[derive(Clone, Debug)]
@@ -88,7 +107,7 @@ impl fmt::Display for Value {
 
 impl fmt::Display for ValueRef {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self._ref)
+        write!(f, "{}", self.borrow())
     }
 }
 
@@ -114,7 +133,7 @@ impl Trace for Value {
                         Some(v) => {
                             let destination_1 = graph.add_node(v.to_string());
                             graph.add_edge(destination_1, op_index, "".to_string());
-                            build(graph, &v._ref, destination_1);
+                            build(graph, &v.borrow(), destination_1);
                         }
                         None => (),
                     }
@@ -123,7 +142,9 @@ impl Trace for Value {
                         Some(v) => {
                             let destination_1 = graph.add_node(v.to_string());
                             graph.add_edge(destination_1, op_index, "".to_string());
-                            build(graph, &v._ref, destination_1);
+                            build(graph, 
+                                
+                                &v.borrow(), destination_1);
                         }
                         None => (),
                     }
@@ -151,10 +172,11 @@ fn main() {
     let mut l = d.clone() * f.clone(); // Error: this does not work due to copy
     l.label = Some('L'.to_string());
 
-    l.grad = 1.0;
+   
     d.grad = -2.0;
-    f.grad = 4.0;
-
+    l._prev.0.as_mut().unwrap().borrow_mut().grad=4.0; 
+    //l._prev.1.as_mut().unwrap().borrow_mut().grad=-2.0; //.as_ref().borrow_mut().grad = 4.0;
+    l.grad = 1.0;
     let graph = l.trace();
 
     println!(
