@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::borrow::BorrowMut;
 use std::cell::Cell;
 use std::cell::Ref;
 use std::cell::RefCell;
@@ -79,6 +80,22 @@ impl ops::Add for Value {
         }
     }
 }
+
+// impl<'a> ops::Mul<&'a Value> for Value {
+//     type Output = Value;
+
+//     fn mul(self, rhs: &'a Value) -> Self::Output {
+//         let left_op = ValueRef::new(self.clone());
+//         let right_op = ValueRef::new(*rhs);
+//         Self {
+//             data: self.data * rhs.data,
+//             _prev: (Some(left_op), Some(right_op)),
+//             _op: Some('*'.to_string()),
+//             label: None,
+//             grad: 0.0,
+//         }
+//     }
+// }
 
 impl ops::Mul for Value {
     type Output = Self;
@@ -169,13 +186,13 @@ fn main() {
     let mut d = e + c;
     d.label = Some('d'.to_string());
     let mut f = Value::new(-2.0, "f");
-    let mut l = d.clone() * f.clone(); // Error: this does not work due to copy
+    let mut l = d * f; // Error: this does not work due to copy
     l.label = Some('L'.to_string());
 
    
-    d.grad = -2.0;
+    //d.grad = -2.0;
     l._prev.0.as_mut().unwrap().borrow_mut().grad=4.0; 
-    //l._prev.1.as_mut().unwrap().borrow_mut().grad=-2.0; //.as_ref().borrow_mut().grad = 4.0;
+    l._prev.1.as_mut().unwrap().borrow_mut().grad=-2.0; //.as_ref().borrow_mut().grad = 4.0;
     l.grad = 1.0;
     let graph = l.trace();
 
